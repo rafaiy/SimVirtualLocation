@@ -273,57 +273,56 @@ class Runner {
     }
 
     func taskForIOS(args: [String], showAlert: (String) -> Void) async throws -> Process {
-        let whichTask = Process()
-        let whichURL = URL(fileURLWithPath: "/usr/bin/find")
-        let userPath = "/Users/\(NSUserName())/Library"
-        whichTask.executableURL = whichURL
-        whichTask.currentDirectoryURL = URL(fileURLWithPath: userPath)
-        whichTask.arguments = ["Python", "-name", "pymobiledevice3"]
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-
-        whichTask.standardOutput = outputPipe
-        whichTask.standardError = errorPipe
-
-        try whichTask.run()
-        whichTask.waitUntilExit()
-
+        // Check cache
         if pymobiledevicePath == nil || pymobiledevicePath == "" {
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            try outputPipe.fileHandleForReading.close()
-            let rawValue = String(decoding: data, as: UTF8.self)
-            let sortedPaths = rawValue.split(separator: "\n").sorted{ a, b in
-                b.localizedCaseInsensitiveCompare(a) == .orderedDescending
-            }
+            pymobiledevicePath = findPymobiledevice3Path()
 
-            if let path = sortedPaths.first {
-                pymobiledevicePath = "\(userPath)/\(String(path))"
-            } else {
-                showAlert("""
-                pymobiledevice3 not found, it should be installed with python
-                to install pymobiledevice3 properly try install it with following command:
-                `brew install python3 && python3 -m pip install -U pymobiledevice3 --break-system-packages --user`
-                """)
+            if pymobiledevicePath == nil {
+                // Check if Python is installed
+                let pythonCheck = checkPythonInstallation()
+
+                var message = """
+                pymobiledevice3 not found. Searched the following locations:
+                • System PATH (using 'which' command)
+                • /opt/homebrew/bin/
+                • /usr/local/bin/
+                • /Applications/anaconda3/bin/
+                • ~/.local/bin/
+                • ~/Library/Python/*/bin/
+
+                """
+
+                if !pythonCheck.isInstalled {
+                    message += """
+                    ⚠️ Python 3 is not installed!
+
+                    Install Python 3 first:
+                    brew install python3
+
+                    Then install pymobiledevice3:
+                    python3 -m pip install -U pymobiledevice3 --break-system-packages --user
+                    """
+                } else {
+                    message += """
+                    Python version: \(pythonCheck.version ?? "unknown")
+
+                    Installation command:
+                    python3 -m pip install -U pymobiledevice3 --break-system-packages --user
+
+                    After installation, verify with: which pymobiledevice3
+                    """
+                }
+
+                showAlert(message)
                 pymobiledevicePath = ""
             }
-
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let error = String(decoding: errorData, as: UTF8.self)
-            if !error.isEmpty {
-                showAlert(error)
-            }
-            try? errorPipe.fileHandleForReading.close()
         }
 
-//        #if arch(arm64)
-//        let path: URL = URL(string: "file:///opt/homebrew/bin/pymobiledevice3")!
-//        #else
-//        let path: URL = URL(string: "file:///usr/local/bin/pymobiledevice3")!
-//        #endif
+        guard let validPath = pymobiledevicePath, !validPath.isEmpty else {
+            throw NSError(domain: "Runner", code: 1, userInfo: [NSLocalizedDescriptionKey: "pymobiledevice3 not found"])
+        }
 
-        let path: URL = URL(fileURLWithPath: pymobiledevicePath!)
-
+        let path = URL(fileURLWithPath: validPath)
         let task = Process()
         task.executableURL = path
         task.arguments = args
@@ -332,6 +331,114 @@ class Runner {
     }
 
     // MARK: - Private Methods
+
+    private func checkPythonInstallation() -> (isInstalled: Bool, version: String?) {
+        let pythonCommands = ["python3", "python"]
+
+        for command in pythonCommands {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+            task.arguments = [command]
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = Pipe()
+
+            do {
+                try task.run()
+                task.waitUntilExit()
+
+                if task.terminationStatus == 0 {
+                    // Found Python, get version
+                    let versionTask = Process()
+                    versionTask.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                    versionTask.arguments = [command, "--version"]
+
+                    let versionPipe = Pipe()
+                    versionTask.standardOutput = versionPipe
+                    versionTask.standardError = versionPipe
+
+                    try? versionTask.run()
+                    versionTask.waitUntilExit()
+
+                    let versionData = versionPipe.fileHandleForReading.readDataToEndOfFile()
+                    let versionString = String(decoding: versionData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    return (true, versionString)
+                }
+            } catch {
+                continue
+            }
+        }
+
+        return (false, nil)
+    }
+
+    private func findPymobiledevice3Path() -> String? {
+        let fileManager = FileManager.default
+
+        // Strategy 1: Use 'which' to find pymobiledevice3 in PATH (fastest and most reliable)
+        let whichTask = Process()
+        whichTask.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        whichTask.arguments = ["pymobiledevice3"]
+
+        let whichPipe = Pipe()
+        whichTask.standardOutput = whichPipe
+        whichTask.standardError = Pipe() // Suppress errors
+
+        do {
+            try whichTask.run()
+            whichTask.waitUntilExit()
+
+            if whichTask.terminationStatus == 0 {
+                let data = whichPipe.fileHandleForReading.readDataToEndOfFile()
+                let pathString = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !pathString.isEmpty && fileManager.fileExists(atPath: pathString) {
+                    return pathString
+                }
+            }
+        } catch {
+            // Fall through to manual search
+        }
+
+        // Strategy 2: Check common installation paths
+        let commonPaths = [
+            "/opt/homebrew/bin/pymobiledevice3",              // ARM64 homebrew
+            "/usr/local/bin/pymobiledevice3",                 // Intel homebrew
+            "/Applications/anaconda3/bin/pymobiledevice3",    // Anaconda
+            "\(NSHomeDirectory())/.local/bin/pymobiledevice3" // pip user local
+        ]
+
+        for path in commonPaths {
+            if fileManager.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // Strategy 3: Search ~/Library/Python/*/bin/pymobiledevice3
+        let libraryPath = "\(NSHomeDirectory())/Library/Python"
+
+        guard fileManager.fileExists(atPath: libraryPath) else {
+            return nil
+        }
+
+        do {
+            let pythonVersions = try fileManager.contentsOfDirectory(atPath: libraryPath)
+            let sortedVersions = pythonVersions.sorted().reversed() // Prefer newer versions
+
+            for version in sortedVersions {
+                let binPath = "\(libraryPath)/\(version)/bin/pymobiledevice3"
+                if fileManager.fileExists(atPath: binPath) {
+                    return binPath
+                }
+            }
+        } catch {
+            return nil
+        }
+
+        return nil
+    }
 
     private func taskForAndroid(args: [String], adbPath: String) -> Process {
         let path = adbPath
