@@ -8,7 +8,7 @@
 import Foundation
 import CoreLocation
 
-class Runner {
+class Runner : @unchecked Sendable {
 
     // MARK: - Internal Properties
 
@@ -18,13 +18,13 @@ class Runner {
 
     // MARK: - Private Properties
 
-    private let runnerQueue = DispatchQueue(label: "runnerQueue", qos: .background)
+    private let runnerQueue = DispatchQueue(label: "runnerQueue", qos: .utility)
     private let executionQueue = DispatchQueue(label: "executionQueue", qos: .background, attributes: .concurrent)
     private var idevicelocationPath: URL?
 
     private var currentTask: Process?
     private var tasks: [Process] = []
-    private let maxTasksCount = 10
+    private let maxTasksCount = 1000
 
     private var isStopped: Bool = false
 
@@ -123,7 +123,6 @@ class Runner {
         }
 
         self.isStopped = false
-
         guard !self.isStopped else {
             return
         }
@@ -163,7 +162,12 @@ class Runner {
                 if self.tasks.count > self.maxTasksCount {
                     self.stop()
                 }
+                print("RAR ::: >>> task \(task)")
                 self.tasks.append(task)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    self.tasks.first?.terminate()
+                    self.tasks.removeFirst()
+                }
             }
 
             task.waitUntilExit()
@@ -273,6 +277,7 @@ class Runner {
     }
 
     func taskForIOS(args: [String], showAlert: (String) -> Void) async throws -> Process {
+
         // Check cache
         if pymobiledevicePath == nil || pymobiledevicePath == "" {
             pymobiledevicePath = findPymobiledevice3Path()
@@ -326,14 +331,13 @@ class Runner {
         let task = Process()
         task.executableURL = path
         task.arguments = args
-
         return task
     }
 
     // MARK: - Private Methods
 
     private func checkPythonInstallation() -> (isInstalled: Bool, version: String?) {
-        let pythonCommands = ["python3", "python"]
+        let pythonCommands = [ "python", "python3"]
 
         for command in pythonCommands {
             let task = Process()

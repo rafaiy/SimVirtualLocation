@@ -36,16 +36,16 @@ class LocationController: NSObject, ObservableObject, MKMapViewDelegate, CLLocat
 
     @Published var isSimulating = false
     @Published var speed: Double = 60.0
-    @Published var pointsMode: PointsMode = .single {
+    @Published var pointsMode: PointsMode = .two {
         didSet { handlePointsModeChange() }
     }
-    @Published var deviceMode: DeviceMode = .simulator
+    @Published var deviceMode: DeviceMode = .device
     @Published var xcodePath: String = "/Applications/Xcode.app" {
         didSet { defaults.set(xcodePath, forKey: Constants.defaultsXcodePathKey) }
     }
 
     /// For iOS 17+
-    @Published var useRSD: Bool = false
+    @Published var useRSD: Bool = true
 
     @Published var bootedSimulators: [Simulator] = []
     @Published var selectedSimulator: String = ""
@@ -59,8 +59,8 @@ class LocationController: NSObject, ObservableObject, MKMapViewDelegate, CLLocat
     @Published var adbDeviceId: String = ""
     @Published var isEmulator: Bool = false
 
-    @Published var RSDAddress: String = ""
-    @Published var RSDPort: String = ""
+    @Published var RSDAddress: String = "fdd5:2097:1fa3::1"
+    @Published var RSDPort: String = "56683"
 
     @Published var timeScale: Double = 1.5 {
         didSet { runner.timeDelay = timeScale }
@@ -151,6 +151,28 @@ class LocationController: NSObject, ObservableObject, MKMapViewDelegate, CLLocat
             return
         }
         run(location: location)
+    }
+    
+    func sendLocationManually() {
+//        guard let location = locationManager.location?.coordinate else {
+//            showAlert("Current location is unavailable")
+//            return
+//        }
+        
+        let startPoint = annotations[0].coordinate
+        if deviceMode == .device {
+            if useRSD {
+                Task {
+                    try await runner.runOnNewIos(
+                        location: startPoint,
+                        RSDAddress: RSDAddress,
+                        RSDPort: RSDPort,
+                        showAlert: showAlert
+                    )
+                }
+                
+            }
+        }
     }
 
     func setSelectedLocation(toBPoint: Bool = false) {
@@ -737,13 +759,13 @@ class LocationController: NSObject, ObservableObject, MKMapViewDelegate, CLLocat
         annotations.append(annotation)
         self.mapView.mkMapView.addAnnotation(annotation)
     }
-
+    var currentTask: Task<(), any Error>?
     private func run(location: CLLocationCoordinate2D) {
         defaults.set(deviceType, forKey: "device_type")
         defaults.set(adbPath, forKey: "adb_path")
         defaults.set(adbDeviceId, forKey: "adb_device_id")
         defaults.set(isEmulator, forKey: "is_emulator")
-        
+
         if deviceType != 0 {
             do {
                 try runOnAndroid(location: location)
@@ -753,16 +775,16 @@ class LocationController: NSObject, ObservableObject, MKMapViewDelegate, CLLocat
             return
         }
         if deviceMode == .device {
-            if useRSD {
-                Task {
-                    try await runner.runOnNewIos(
-                        location: location,
-                        RSDAddress: RSDAddress,
-                        RSDPort: RSDPort,
-                        showAlert: showAlert
-                    )
-                }
 
+            if useRSD {
+                    currentTask = Task {
+                        try await runner.runOnNewIos(
+                            location: location,
+                            RSDAddress: RSDAddress,
+                            RSDPort: RSDPort,
+                            showAlert: showAlert
+                        )
+                    }
             } else {
                 Task {
                     try await runner.runOnIos(

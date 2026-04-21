@@ -23,6 +23,13 @@ struct LocationSettingsPanel: View {
                     Text("Single").tag(LocationController.PointsMode.single)
                     Text("Two").tag(LocationController.PointsMode.two)
                 }.pickerStyle(.segmented)
+                
+                
+                Button(action: {
+                    locationController.sendLocationManually()
+                }, label: {
+                    Text("send location manually").frame(maxWidth: .infinity)
+                })
 
                 Button(action: {
                     locationController.setCurrentLocation()
@@ -115,6 +122,10 @@ struct LocationSettingsPanel: View {
             GroupBox {
                 if locationController.useRSD {
                     Picker("Location update frequency", selection: $locationController.timeScale) {
+                        Text("1s").tag(1.0)
+                        Text("2s").tag(2.0)
+                        Text("3s").tag(3.0)
+                        Text("4s").tag(4.0)
                         Text("5s").tag(5.0)
                         Text("10s").tag(10.0)
                         Text("15s").tag(15.0)
